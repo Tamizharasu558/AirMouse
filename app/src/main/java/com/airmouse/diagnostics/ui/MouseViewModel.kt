@@ -2,6 +2,7 @@ package com.airmouse.diagnostics.ui
 
 import android.app.Application
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -17,6 +18,7 @@ import com.airmouse.diagnostics.motion.CalibrationCollector
 import com.airmouse.diagnostics.motion.MotionConfig
 import com.airmouse.diagnostics.motion.MotionProcessor
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,12 +74,16 @@ class MouseViewModel(app: Application) : AndroidViewModel(app) {
     private val _connectedLabel = MutableStateFlow<String?>(null)
     val connectedLabel: StateFlow<String?> = _connectedLabel.asStateFlow()
 
+    /** True while the left button is held down (HID button bit latched until release). */
+    private val _lHeld = MutableStateFlow(false)
+    val lHeld: StateFlow<Boolean> = _lHeld.asStateFlow()
+
     init {
         client.appStatus.onEach { _status.value = it }.launchIn(viewModelScope)
         client.lastError.onEach { if (it != null) _lastError.value = it }.launchIn(viewModelScope)
         client.connections.onEach { m ->
             refreshDeviceList(m)
-            val connected = m.entries.firstOrNull { it.value == 2 } // STATE_CONNECTED
+            val connected = m.entries.firstOrNull { it.value == BluetoothProfile.STATE_CONNECTED }
             _connectedLabel.value = connected?.let { entry ->
                 _devices.value.firstOrNull { it.address == entry.key }?.name ?: entry.key
             }
@@ -112,6 +118,26 @@ class MouseViewModel(app: Application) : AndroidViewModel(app) {
     fun sendPress(buttons: Int) = sendReport(MouseReport.press(buttons), "press b=$buttons")
     fun sendRelease() = sendReport(MouseReport.release(), "release")
     fun sendWheel(amount: Int) = sendReport(MouseReport.wheel(amount), "wheel $amount")
+
+    /** Left button: tap to press and hold, tap again to release (for click-drag). */
+    fun sendLPress() {
+        sendReport(MouseReport.press(MouseReport.BUTTON_LEFT), "L press")
+        _lHeld.value = true
+    }
+
+    fun sendLRelease() {
+        sendReport(MouseReport.release(), "release")
+        _lHeld.value = false
+    }
+
+    /** Right button: full click — press, brief gap so the host sees both edges, release. */
+    fun rightClick() {
+        viewModelScope.launch {
+            sendReport(MouseReport.press(MouseReport.BUTTON_RIGHT), "R press")
+            delay(60)
+            sendReport(MouseReport.release(), "release")
+        }
+    }
 
     fun sendMove(dx: Int, dy: Int) = sendReport(MouseReport.move(dx, dy), "move $dx,$dy")
 

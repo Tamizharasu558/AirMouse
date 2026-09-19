@@ -7,3 +7,6 @@ local.properties
 *.iml
 *.hprof
 .DS_Store
+# Generated download/build files
+*.log
+*.jar
